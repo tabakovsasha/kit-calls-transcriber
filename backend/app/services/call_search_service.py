@@ -64,8 +64,14 @@ async def search_calls(
     records_limit: int,
     cursor: Optional[str] = None,
     transcripts_by_call: Optional[dict[str, str]] = None,
+    metadata_sink: Optional[dict[str, dict[str, Any]]] = None,
 ) -> CallSearchResponse:
-    """Page through the upstream history API until the limit or budget is hit."""
+    """Page through the upstream history API until the limit or budget is hit.
+
+    ``metadata_sink``, when provided, is filled with the raw per-call metadata
+    (including ``record_url``) so the caller can cache it server-side. That URL
+    embeds an access token and must never reach the browser.
+    """
     client_wrapper = VoximplantClient(credentials)
     from_value, to_value, clamped = clamp_datetime_range_to_now(from_date, to_date)
     from_dt = parse_call_datetime(from_value)
@@ -111,6 +117,17 @@ async def search_calls(
                 call_id = str(item.get("id") or "").strip()
                 if not call_id:
                     continue
+
+                if metadata_sink is not None:
+                    metadata_sink[call_id] = {
+                        "record_url": item.get("record_url"),
+                        "datetime_start": item.get("datetime_start"),
+                        "timezone": extract_call_timezone(item),
+                        "phone_a": item.get("phone_a"),
+                        "phone_b": item.get("phone_b"),
+                        "duration": int(item.get("duration") or 0),
+                        "scenario_name": _scenario_name(item),
+                    }
 
                 audio_url: Optional[str] = None
                 if item.get("record_url"):

@@ -188,6 +188,11 @@ class TranscriptResponse(ORMModel):
     created_at: datetime
 
 
+class ScenarioItem(BaseModel):
+    id: Optional[int] = None
+    title: Optional[str] = None
+
+
 class AudioUrlRequest(BaseModel):
     connection_id: UUID
     call_id: str = Field(min_length=1, max_length=128)

@@ -40,6 +40,8 @@ SEARCH_RETRY_DELAY_SECONDS = 1.0
 MAX_SEARCH_RETRIES = 2
 SEARCH_TIMEOUT_SECONDS = 120
 AUDIO_TIMEOUT_SECONDS = 180
+SCENARIO_PAGE_SIZE = 100
+MAX_SCENARIO_PAGES = 50
 
 
 @dataclass(frozen=True)
@@ -162,6 +164,49 @@ class VoximplantClient:
         if cursor:
             form_data["cursor"] = cursor
         return await _post_page(client, self._search_url(), form_data)
+
+    async def search_scenarios(self) -> list[dict[str, Any]]:
+        """List scenarios (id + title) for filter dropdowns, following pagination."""
+        collected: list[dict[str, Any]] = []
+        seen_ids: set[Any] = set()
+        page = 1
+
+        url = build_api_url(
+            self._creds.api_host,
+            f"api/v3/scenario/searchScenarios?domain={self._creds.domain}&sort=-id",
+        )
+
+        async with httpx.AsyncClient(timeout=60) as client:
+            while page <= MAX_SCENARIO_PAGES:
+                payload = await _post_page(
+                    client,
+                    url,
+                    {
+                        "access_token": self._creds.access_token,
+                        "page": page,
+                        "per-page": SCENARIO_PAGE_SIZE,
+                    },
+                )
+                results = payload.get("result")
+                if not isinstance(results, list):
+                    results = []
+
+                for item in results:
+                    if not isinstance(item, dict):
+                        continue
+                    item_id = item.get("id")
+                    if item_id in seen_ids:
+                        continue
+                    seen_ids.add(item_id)
+                    collected.append({"id": item_id, "title": item.get("title")})
+
+                meta = payload.get("_meta") or {}
+                page_count = int(meta.get("pageCount") or 1) if isinstance(meta, dict) else 1
+                if page >= page_count:
+                    break
+                page += 1
+
+        return collected
 
     async def verify(self) -> bool:
         """Cheap credential check used when creating or rotating a connection."""
