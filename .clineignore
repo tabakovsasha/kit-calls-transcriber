@@ -1,0 +1,12 @@
+.git/
+frontend/node_modules/
+frontend/dist/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/.pytest_cache/
+**/coverage/
+*.log
+.env
+.env.*
+data/*.png
