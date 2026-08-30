@@ -1,0 +1,37 @@
+# Pinned to the versions verified in this project's venv (Python 3.14).
+
+# --- Web / ASGI -------------------------------------------------------------
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+python-multipart==0.0.32
+
+# --- HTTP client ------------------------------------------------------------
+httpx==0.28.1
+aiofiles==25.1.0
+
+# --- Persistence ------------------------------------------------------------
+sqlalchemy[asyncio]==2.0.44
+asyncpg==0.30.0
+alembic==1.16.5
+greenlet==3.2.4
+
+# --- Configuration ----------------------------------------------------------
+pydantic==2.13.4
+pydantic-settings==2.11.0
+python-dotenv==1.2.3
+email-validator==2.3.0
+
+# --- Security ---------------------------------------------------------------
+argon2-cffi==25.1.0
+pyjwt==2.10.1
+cryptography==46.0.3
+
+# --- Transcription / audio --------------------------------------------------
+openai-whisper==20250625
+librosa==1.0.0
+numpy==2.5.2
+scipy==1.18.1
+psutil==7.2.2
+
+# --- Export -----------------------------------------------------------------
+openpyxl==3.1.5

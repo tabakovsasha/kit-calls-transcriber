@@ -1,0 +1,16 @@
+venv/
+__pycache__/
+*.py[cod]
+audio-cache/
+whisper-models/
+
+# Secrets: never commit the real environment file.
+.env
+.env.*
+!.env.example
+
+# Local runtime state and secrets
+transcripts-cache.json
+schedules.json
+transcription-queue.json
+voximplant_credentials.json

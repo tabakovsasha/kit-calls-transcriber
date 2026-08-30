@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:16.4-alpine
+    container_name: kit_transcriber_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: kitapp
+      POSTGRES_PASSWORD: kitapp
+      POSTGRES_DB: kit_calls_transcriber
+    ports:
+      # Bound to loopback only: the database is never exposed to the network.
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - kit_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kitapp -d kit_calls_transcriber"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  kit_pgdata:
