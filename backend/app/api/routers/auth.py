@@ -16,6 +16,7 @@ from typing import Optional
 from fastapi import APIRouter, Request, Response, status
 
 from app.api.deps import (
+    ActiveUserDep,
     CurrentUserDep,
     SessionDep,
     get_client_ip,
@@ -31,9 +32,10 @@ from app.schemas.auth import (
     LoginRequest,
     SessionInfo,
     TokenResponse,
+    WsTicketResponse,
 )
 from app.schemas.common import MessageResponse
-from app.services import auth_service, user_service
+from app.services import auth_service, media_service, user_service
 from app.services.audit_service import AuditAction, record_audit_event
 
 logger = logging.getLogger(__name__)
@@ -211,6 +213,23 @@ async def revoke_other_sessions(
     )
     await db.commit()
     return MessageResponse(message=f"Завершено сессий: {revoked}")
+
+
+@router.post("/ws-ticket", response_model=WsTicketResponse)
+async def create_ws_ticket(request: Request, user: ActiveUserDep) -> WsTicketResponse:
+    """Mint a short-lived ticket for the realtime websocket.
+
+    The access token itself is deliberately not reusable as a websocket
+    credential: it would end up in the URL, and therefore in proxy and browser
+    history logs. The ticket is scoped to ``ws``, to this user and to this
+    session, and it is never logged.
+    """
+    session_id = getattr(request.state, "session_id", None)
+    if session_id is None:
+        raise AuthError("Требуется авторизация")
+
+    ticket, expires_at = media_service.build_ws_ticket(user.id, session_id)
+    return WsTicketResponse(ticket=ticket, expires_at=expires_at)
 
 
 @router.post("/change-password", response_model=MessageResponse)

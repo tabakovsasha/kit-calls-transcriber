@@ -36,7 +36,9 @@ from app.api.routers import (
     profile,
     queue,
     schedules,
+    settings,
     users,
+    ws,
 )
 from app.core.config import get_settings
 from app.core.errors import AppError
@@ -61,6 +63,7 @@ ROUTERS = (
     queue.router,
     schedules.router,
     audio.router,
+    settings.router,
 )
 
 
@@ -84,6 +87,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     async with SessionFactory() as db:
         await ensure_bootstrap_admin(db, settings)
+        # Load persisted settings (default model, profile) into the in-process
+        # cache so the worker and enqueue logic never query per item.
+        from app.services import app_settings_service
+        await app_settings_service.load_all(db)
 
     worker_service.start_workers()
     logger.info(
@@ -189,6 +196,11 @@ def create_app() -> FastAPI:
 
     for router in ROUTERS:
         app.include_router(router, prefix=API_PREFIX)
+
+    # The websocket lives outside the /api prefix: it is a separate transport,
+    # not a REST resource, and it authenticates with a ticket rather than a
+    # bearer header.
+    app.include_router(ws.router)
 
     @app.get("/health", tags=["system"])
     async def health() -> dict[str, str]:

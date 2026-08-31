@@ -5,6 +5,8 @@ Ported from the legacy single-file app with the same defensive behaviour:
 - inference is serialized per model instance by default (CPU safety);
 - degenerate audio is detected and skipped rather than crashing the worker;
 - every blocking call runs in a thread with a hard timeout.
+
+Extended with download/delete operations and status tracking for the UI.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ import contextlib
 import io
 import logging
 import os
+import shutil
 from pathlib import Path
 from typing import Any, Optional
 
@@ -31,6 +34,16 @@ MIN_WHISPER_AUDIO_SECONDS = 1.0
 MIN_AUDIO_FILE_BYTES = 100
 MIN_AUDIO_SECONDS_FOR_TRANSCRIBE = 0.1
 SAMPLE_RATE = 16000
+
+# Approximate model sizes in MB (for UI display and concurrency planning)
+MODEL_SIZES_MB = {
+    "tiny": 75, "tiny.en": 75,
+    "base": 145, "base.en": 145,
+    "small": 488, "small.en": 488,
+    "medium": 1540, "medium.en": 1540,
+    "large": 3100, "large-v1": 3100, "large-v2": 3100, "large-v3": 3100,
+    "turbo": 1600, "large-v3-turbo": 1600,
+}
 
 _loaded_models: dict[str, Any] = {}
 _loading_tasks: dict[str, asyncio.Task] = {}
@@ -65,9 +78,63 @@ def get_model_status(model_name: str) -> dict[str, Any]:
 
 
 def list_model_statuses() -> list[dict[str, Any]]:
-    return [
-        {"name": name, **get_model_status(name)} for name in SUPPORTED_WHISPER_MODELS
-    ]
+    statuses = []
+    for name in SUPPORTED_WHISPER_MODELS:
+        status = get_model_status(name)
+        statuses.append({
+            "name": name,
+            "size_mb": MODEL_SIZES_MB.get(name, 1500),
+            **status,
+        })
+    return statuses
+
+
+async def delete_model(model_name: str) -> dict[str, Any]:
+    """Remove a downloaded model from disk and unload it from memory.
+    
+    Returns status dict. Never raises; errors are returned in the dict.
+    """
+    normalized = normalize_whisper_model_name(model_name)
+    
+    # Don't delete a model that's currently in use
+    if normalized in _loaded_models:
+        return {
+            "success": False,
+            "error": "Модель используется. Дождитесь завершения активных транскрибаций.",
+        }
+    
+    # Don't delete a model that's currently downloading
+    if normalized in _loading_tasks:
+        return {
+            "success": False,
+            "error": "Модель скачивается. Дождитесь завершения.",
+        }
+    
+    ensure_models_dir()
+    aliases = {"turbo": ["large-v3-turbo.pt", "turbo.pt"]}
+    candidates = [MODELS_DIR / normalized, MODELS_DIR / f"{normalized}.pt"]
+    candidates.extend(MODELS_DIR / alias for alias in aliases.get(normalized, []))
+    
+    deleted = []
+    for path in candidates:
+        if path.exists():
+            try:
+                if path.is_file():
+                    path.unlink()
+                elif path.is_dir():
+                    shutil.rmtree(path)
+                deleted.append(str(path.name))
+            except Exception as exc:
+                logger.warning("[WHISPER] Не удалось удалить %s: %s", path, exc)
+                return {"success": False, "error": f"Ошибка удаления файла: {exc}"}
+    
+    # Clear any cached state
+    _model_states.pop(normalized, None)
+    
+    if not deleted:
+        return {"success": False, "error": "Модель не найдена на диске"}
+    
+    return {"success": True, "deleted": deleted}
 
 
 def _inference_lock(model_name: str) -> asyncio.Lock:

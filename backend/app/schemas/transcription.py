@@ -59,12 +59,14 @@ class CallSearchResponse(BaseModel):
 class QueueAddRequest(BaseModel):
     connection_id: UUID
     call_ids: List[str] = Field(min_length=1, max_length=500)
-    whisper_model: str = DEFAULT_WHISPER_MODEL
+    # None means "use the persisted default": the model is a server-side setting,
+    # so a client that does not care must not pin itself to a hardcoded value.
+    whisper_model: Optional[str] = None
 
     @field_validator("whisper_model")
     @classmethod
-    def check_model(cls, value: str) -> str:
-        return normalize_whisper_model_name(value)
+    def check_model(cls, value: Optional[str]) -> Optional[str]:
+        return None if value is None else normalize_whisper_model_name(value)
 
 
 class QueueClearRequest(BaseModel):
@@ -111,6 +113,22 @@ class QueueSnapshot(BaseModel):
     items: List[QueueItemResponse]
     counters: QueueCounters
     is_running: bool = False
+
+
+class QueueAddResponse(BaseModel):
+    """Outcome of a batch enqueue.
+
+    The snapshot alone cannot tell the user what happened to *their* request:
+    an idempotent add silently leaves already-active calls alone. These counts
+    make the result explainable ("added 10, skipped 2, because ...").
+    """
+
+    queued: int = 0
+    # Already queued or processing, so re-adding would duplicate work.
+    skipped_active: List[str] = Field(default_factory=list)
+    # Metadata (and therefore the record URL) fell out of the server-side cache.
+    skipped_expired: List[str] = Field(default_factory=list)
+    snapshot: QueueSnapshot
 
 
 class ScheduleCreateRequest(BaseModel):

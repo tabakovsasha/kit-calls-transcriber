@@ -10,6 +10,9 @@ whisper-models/
 .env.*
 !.env.example
 
+# Generated development test credentials
+.dev-test-credentials
+
 # Local runtime state and secrets
 transcripts-cache.json
 schedules.json

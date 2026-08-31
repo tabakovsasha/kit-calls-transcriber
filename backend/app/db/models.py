@@ -5,6 +5,7 @@ Normalized schema:
 - voximplant_connections                           -> multi-account per user
 - transcription_queue_items / transcripts          -> transcription domain
 - transcription_schedules                          -> recurring jobs
+- app_settings                                     -> global runtime settings
 - audit_events                                     -> security audit trail
 
 Ownership rule: every domain row carries owner_user_id, and it is always
@@ -29,6 +30,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -160,8 +162,17 @@ class VoximplantConnection(Base, TimestampMixin):
 
     __tablename__ = "voximplant_connections"
     __table_args__ = (
-        UniqueConstraint(
-            "owner_user_id", "api_host", "domain", name="uq_connection_owner_host_domain"
+        # Partial index, not a plain UniqueConstraint: deletes are soft
+        # (deleted_at is set and the ciphertext is scrubbed), so a table-wide
+        # constraint would keep a dead row reserving host+domain forever and
+        # make recreating the same connection fail at the DB level.
+        Index(
+            "uq_connection_owner_host_domain",
+            "owner_user_id",
+            "api_host",
+            "domain",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
         ),
         Index("ix_connections_owner", "owner_user_id"),
         Index("ix_connections_owner_default", "owner_user_id", "is_default"),
@@ -309,6 +320,23 @@ class TranscriptionSchedule(Base, TimestampMixin):
     last_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     last_run_slot: Mapped[Optional[str]] = mapped_column(String(64))
     last_result: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
+
+
+class AppSetting(Base):
+    """Global, server-side application settings.
+
+    Not owner-scoped on purpose: these are process-wide runtime settings
+    (Whisper default model, performance profile) that only an ADMIN may change.
+    One row per key, value is JSONB so a key can hold a scalar or an object.
+    """
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    value: Mapped[Any] = mapped_column(JSONB, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
 class AuditEvent(Base):

@@ -185,6 +185,15 @@ async def scheduler_loop() -> None:
     logger.info("[SCHEDULER] Loop stopped")
 
 
+def is_running() -> bool:
+    """Whether the background loops are alive.
+
+    Reflects real state rather than a stored flag: the queue drains only while
+    these tasks exist and have not finished.
+    """
+    return bool(_tasks) and any(not task.done() for task in _tasks)
+
+
 def start_workers() -> None:
     """Start the background loops. Idempotent."""
     if _tasks:

@@ -255,6 +255,49 @@ async def requeue_by_status(
     return len(items)
 
 
+CANCELABLE_STATUSES = (QueueItemStatus.QUEUED,)
+RETRYABLE_STATUSES = (
+    QueueItemStatus.FAILED,
+    QueueItemStatus.SKIPPED,
+    QueueItemStatus.CANCELED,
+)
+
+
+def can_cancel(item: TranscriptionQueueItem) -> bool:
+    """Only waiting items can be cancelled.
+
+    An item mid-inference is deliberately excluded: Whisper runs inside a
+    thread and there is no safe way to abort it, so the honest answer is that
+    it must finish. Nothing here ever tries to kill a running model.
+    """
+    return item.status in CANCELABLE_STATUSES
+
+
+def can_retry(item: TranscriptionQueueItem) -> bool:
+    return item.status in RETRYABLE_STATUSES
+
+
+def cancel_item(item: TranscriptionQueueItem) -> None:
+    """Cancel one waiting item. Caller checked ``can_cancel``."""
+    item.status = QueueItemStatus.CANCELED
+    item.error_message = None
+    item.finished_at = utcnow()
+
+
+def retry_item(item: TranscriptionQueueItem) -> None:
+    """Send one terminal item back to the queue.
+
+    ``attempts`` is intentionally left as-is: it is a lifetime counter of how
+    many times this call was actually handed to the worker, and resetting it
+    would hide a call that keeps failing. The claim step increments it again.
+    """
+    item.status = QueueItemStatus.QUEUED
+    item.error_message = None
+    item.transcript_text = None
+    item.started_at = None
+    item.finished_at = None
+
+
 async def cancel_active(db: AsyncSession, owner_user_id: uuid.UUID) -> int:
     """Cancel everything still waiting. Items mid-inference finish on their own."""
     items = await list_items(db, owner_user_id, statuses=[QueueItemStatus.QUEUED])
