@@ -1,5 +1,7 @@
 /** Small presentational primitives shared by the pages. */
 
+import { useEffect, useRef, useState } from "react";
+
 export function Card({ title, description, actions, children }) {
   return (
     <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
@@ -129,3 +131,113 @@ export function EmptyState({ title, description }) {
     </div>
   );
 }
+
+/**
+ * Compact icon-only button.
+ *
+ * Used where a text button would bloat a table row. The label is mandatory: it
+ * becomes both `aria-label` and `title`, so the control stays reachable by
+ * screen readers and explains itself on hover.
+ */
+export function IconButton({ label, active = false, className = "", children, ...props }) {
+  const tone = active
+    ? "border-slate-400 bg-slate-100 text-slate-900"
+    : "border-slate-300 bg-white text-slate-600 hover:bg-slate-50";
+
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      className={`inline-flex h-8 w-8 items-center justify-center rounded-md border transition disabled:cursor-not-allowed disabled:text-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-1 ${tone} ${className}`}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** Triangular play glyph. Inline SVG keeps the bundle free of an icon library. */
+export function PlayIcon({ className = "h-4 w-4" }) {
+  return (
+    <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" className={className}>
+      <path d="M6.3 3.6a1 1 0 0 1 1.02.05l8 5.5a1 1 0 0 1 0 1.7l-8 5.5A1 1 0 0 1 5.75 15.5V4.5a1 1 0 0 1 .55-.9Z" />
+    </svg>
+  );
+}
+
+/** Two vertical bars, the paused counterpart of PlayIcon. */
+export function StopIcon({ className = "h-4 w-4" }) {
+  return (
+    <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" className={className}>
+      <path d="M6.5 4h2.2v12H6.5V4Zm4.8 0h2.2v12h-2.2V4Z" />
+    </svg>
+  );
+}
+
+/** Chevron that rotates to signal expanded state. */
+export function ChevronIcon({ expanded = false, className = "h-4 w-4" }) {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      fill="currentColor"
+      aria-hidden="true"
+      className={`${className} transition-transform ${expanded ? "rotate-180" : ""}`}
+    >
+      <path d="M5.6 7.5a1 1 0 0 1 1.4-.1L10 10.2l3-2.8a1 1 0 0 1 1.4 1.5l-3.7 3.4a1 1 0 0 1-1.36 0L5.7 8.9a1 1 0 0 1-.1-1.4Z" />
+    </svg>
+  );
+}
+
+/**
+ * Dropdown panel anchored to a trigger button.
+ *
+ * Closes on outside click and on Escape so it behaves like a native menu. Used
+ * for the queue column picker.
+ */
+export function Popover({ label, children, align = "right" }) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+
+    const onPointerDown = (event) => {
+      if (!containerRef.current?.contains(event.target)) setOpen(false);
+    };
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <div ref={containerRef} className="relative inline-block">
+      <Button
+        variant="secondary"
+        onClick={() => setOpen((prev) => !prev)}
+        aria-expanded={open}
+        aria-haspopup="true"
+      >
+        {label} <ChevronIcon expanded={open} className="ml-1 h-4 w-4" />
+      </Button>
+
+      {open && (
+        <div
+          className={`absolute z-20 mt-1 w-64 rounded-md border border-slate-200 bg-white p-3 shadow-lg ${
+            align === "right" ? "right-0" : "left-0"
+          }`}
+        >
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+

@@ -52,6 +52,18 @@ export const queueApi = {
   // default, and model management is not part of this stage.
   add: (connectionId, callIds) =>
     api.post("/queue/add", { connection_id: connectionId, call_ids: callIds }),
+  // Requeue failed/skipped items.
+  retry: () => api.post("/queue/retry"),
+  // Cancel all QUEUED items (processing ones finish on their own).
+  stop: () => api.post("/queue/stop"),
+  // Remove terminal items (done/failed/skipped/canceled).
+  clear: (statuses) => api.post("/queue/clear", { statuses }),
+  // Cancel one queued item. Rejected by the backend for any other status.
+  cancelItem: (itemId) => api.post(`/queue/${itemId}/cancel`),
+  // Requeue one failed/skipped/canceled item.
+  retryItem: (itemId) => api.post(`/queue/${itemId}/retry`),
+  // Delete one queue item by ID (must not be PROCESSING).
+  deleteItem: (itemId) => api.del(`/queue/${itemId}`),
 };
 
 export const connectionsApi = {

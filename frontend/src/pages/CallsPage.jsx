@@ -10,11 +10,14 @@ import {
   EmptyState,
   ErrorBanner,
   Field,
+  IconButton,
+  PlayIcon,
   Select,
   TextInput,
 } from "../components/ui";
 import { useEvents } from "../realtime/EventsContext";
 import { Link } from "../router";
+import { useCallsState } from "../state/CallsStateContext";
 import { useSelectedConnection } from "../state/SelectedConnectionContext";
 
 /**
@@ -29,9 +32,9 @@ import { useSelectedConnection } from "../state/SelectedConnectionContext";
  * never receives an upstream recording URL. The only identifier it sends is a
  * connection id it owns plus opaque call ids.
  *
- * Filters mirror what the Kit history API actually supports (date range,
- * scenario) plus the two post-filters the backend applies (minimum duration,
- * "has recording"). Nothing here invents a filter the upstream cannot honour.
+ * Filters and the loaded result set are not owned by this component: they live in
+ * CallsStateContext, above the router, and are persisted per connection. Leaving
+ * for /queue and coming back — or reloading the tab — therefore keeps both.
  */
 
 // The upstream page size is 50; these are per-request accumulation targets.
@@ -46,27 +49,8 @@ const QUEUE_STATES = {
   canceled: { label: "отменено", tone: "neutral" },
 };
 
-/** `YYYY-MM-DDTHH:MM` in local time, which is what datetime-local expects. */
-function toLocalInput(date) {
-  const pad = (value) => String(value).padStart(2, "0");
-  return (
-    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
-    `T${pad(date.getHours())}:${pad(date.getMinutes())}`
-  );
-}
-
-function defaultFilters() {
-  const now = new Date();
-  const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-  return {
-    from_date: toLocalInput(dayAgo),
-    to_date: toLocalInput(now),
-    scenario_id: "",
-    min_duration: 0,
-    has_recording: true,
-    records_limit: 50,
-  };
-}
+/** Number of <th> cells in the table; expansion rows span all of them. */
+const COLUMN_COUNT = 10;
 
 function formatDuration(seconds) {
   const total = Number(seconds) || 0;
@@ -99,82 +83,112 @@ function formatPhone(value) {
   const text = String(value ?? "").trim();
   return text || "—";
 }
+
 /**
- * Inline recording player.
+ * Full-width recording player, rendered as its own table row.
  *
- * The signed URL is minted lazily on first play, not while rendering the table:
- * a grant has a short TTL (900s by default), so issuing one for every visible
- * row would hand out links that expire before use. Once loaded, the native
- * <audio> element provides play/pause, seeking and duration for free.
+ * The signed URL is minted when this component mounts, and it only mounts after
+ * the user clicks the play icon. That preserves the lazy-grant rule: a grant has
+ * a short TTL (900s by default), so issuing one per visible row would hand out
+ * links that expire before use. The URL is never persisted — after a reload the
+ * user clicks again and gets a fresh grant.
  */
-function AudioPlayer({ connectionId, callId, onError }) {
+function AudioPlayerRow({ connectionId, callId, onError }) {
   const [src, setSrc] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const audioRef = useRef(null);
 
-  const load = async () => {
-    setLoading(true);
-    try {
-      const data = await callsApi.audioUrl(connectionId, callId);
-      setSrc(data.audio_url);
-    } catch (error) {
-      onError(error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    let cancelled = false;
 
-  // Autoplay once the element has a source, so a single click starts playback.
+    (async () => {
+      try {
+        const data = await callsApi.audioUrl(connectionId, callId);
+        if (!cancelled) setSrc(data.audio_url);
+      } catch (error) {
+        if (!cancelled) onError(error);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [connectionId, callId, onError]);
+
+  // Autoplay once a source exists, so the click that opened the row also starts
+  // playback. A refusal by the autoplay policy is harmless: controls still work.
   useEffect(() => {
     if (src && audioRef.current) {
-      audioRef.current.play().catch(() => {
-        // Autoplay policy refused it; the visible controls still work.
-      });
+      audioRef.current.play().catch(() => {});
     }
   }, [src]);
 
-  if (!src) {
-    return (
-      <Button variant="secondary" onClick={load} disabled={loading}>
-        {loading ? "Загрузка..." : "Прослушать"}
-      </Button>
-    );
-  }
-
   return (
-    <audio
-      ref={audioRef}
-      controls
-      preload="metadata"
-      src={src}
-      className="h-9 w-64 max-w-full"
-      aria-label={`Запись звонка ${callId}`}
-      onError={() =>
-        onError(
-          new ApiError(
-            0,
-            "AUDIO_UNAVAILABLE",
-            "Не удалось загрузить запись. Обновите поиск и попробуйте снова",
-          ),
-        )
-      }
-    >
-      Ваш браузер не поддерживает воспроизведение аудио.
-    </audio>
+    <tr className="border-b border-slate-100 bg-slate-50">
+      <td colSpan={COLUMN_COUNT} className="px-3 py-3">
+        <div className="flex items-center gap-3">
+          <span className="shrink-0 text-xs font-medium uppercase tracking-wide text-slate-500">
+            Запись
+          </span>
+
+          {loading && <span className="text-sm text-slate-500">Загрузка...</span>}
+
+          {src && (
+            /* w-full is the point of this row: the player spans the whole table
+               instead of being squeezed into an action cell. */
+            <audio
+              ref={audioRef}
+              controls
+              preload="metadata"
+              src={src}
+              className="h-10 w-full"
+              aria-label={`Запись звонка ${callId}`}
+              onError={() =>
+                onError(
+                  new ApiError(
+                    0,
+                    "AUDIO_UNAVAILABLE",
+                    "Не удалось загрузить запись. Обновите поиск и попробуйте снова",
+                  ),
+                )
+              }
+            >
+              Ваш браузер не поддерживает воспроизведение аудио.
+            </audio>
+          )}
+
+          {!loading && !src && (
+            <span className="text-sm text-red-600">Запись недоступна</span>
+          )}
+        </div>
+      </td>
+    </tr>
   );
 }
 
-/** One call, plus its expandable recording player and transcript. */
+/**
+ * One call row, plus up to two independent expansion rows below it.
+ *
+ * Audio and transcript expand separately; opening one never collapses the other.
+ * Both support multiple open rows at once across the table, so the user can read
+ * several transcripts or play several recordings without dismissing the others.
+ */
 function CallRow({
   call,
   index,
   connectionId,
   queueStatus,
-  isExpanded,
-  onToggle,
+  audioOpen,
+  transcriptOpen,
+  onToggleAudio,
+  onToggleTranscript,
   onTranscribe,
   onError,
   busy,
+  selected,
+  onToggleSelection,
 }) {
   const state = queueStatus ? QUEUE_STATES[queueStatus] : null;
   const hasTranscript = Boolean(call.transcript);
@@ -184,6 +198,15 @@ function CallRow({
     <>
       <tr className="border-b border-slate-100 align-top hover:bg-slate-50">
         <td className="px-3 py-3 text-slate-400">{index}</td>
+        <td className="px-3 py-3">
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={() => onToggleSelection(call.id)}
+            className="h-4 w-4 rounded border-slate-300"
+            aria-label={`Выбрать звонок ${call.id}`}
+          />
+        </td>
         <td className="whitespace-nowrap px-3 py-3 text-slate-700">
           {formatDateTime(call.datetime_start)}
           {call.timezone && (
@@ -215,11 +238,13 @@ function CallRow({
         <td className="px-3 py-3">
           <div className="flex flex-wrap items-center justify-end gap-2">
             {call.has_recording && (
-              <AudioPlayer
-                connectionId={connectionId}
-                callId={call.id}
-                onError={onError}
-              />
+              <IconButton
+                label="Прослушать запись"
+                active={audioOpen}
+                onClick={onToggleAudio}
+              >
+                <PlayIcon />
+              </IconButton>
             )}
 
             {call.has_recording && !hasTranscript && (
@@ -229,18 +254,25 @@ function CallRow({
             )}
 
             {hasTranscript && (
-              <Button variant="secondary" onClick={onToggle} aria-expanded={isExpanded}>
-                {isExpanded ? "Скрыть транскрипцию" : "Показать транскрипцию"}
+              <Button variant="secondary" onClick={onToggleTranscript}>
+                {transcriptOpen ? "Скрыть транскрипцию" : "Показать транскрипцию"}
               </Button>
             )}
           </div>
         </td>
       </tr>
 
-      {isExpanded && hasTranscript && (
+      {audioOpen && call.has_recording && (
+        <AudioPlayerRow
+          connectionId={connectionId}
+          callId={call.id}
+          onError={onError}
+        />
+      )}
+
+      {transcriptOpen && hasTranscript && (
         <tr className="border-b border-slate-100 bg-slate-50">
-          <td />
-          <td colSpan={8} className="px-3 pb-4">
+          <td colSpan={COLUMN_COUNT} className="px-3 pb-4">
             <p className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-500">
               Транскрипция
             </p>
@@ -254,34 +286,77 @@ function CallRow({
   );
 }
 
+
 export default function CallsPage() {
   const { selectedId: connectionId } = useSelectedConnection();
   const { subscribe } = useEvents();
 
+  // Filters and the loaded result set live above the router, so leaving /calls
+  // and coming back does not reset them. Both are also persisted per connection.
+  const {
+    filters,
+    results,
+    searchedAt,
+    setFilters,
+    setResults,
+    appendResults,
+    updateCall,
+  } = useCallsState();
+
   const [connections, setConnections] = useState([]);
   const [loadingConnections, setLoadingConnections] = useState(false);
-
-  const [filters, setFilters] = useState(defaultFilters);
   const [scenarios, setScenarios] = useState([]);
 
-  const [calls, setCalls] = useState([]);
-  const [searchStatus, setSearchStatus] = useState("idle"); // idle | searching | done
-  const [cursor, setCursor] = useState(null);
-  const [canLoadMore, setCanLoadMore] = useState(false);
-  const [totalLoaded, setTotalLoaded] = useState(0);
+  // Result set, derived from the persisted store rather than local state.
+  const calls = results?.calls ?? [];
+  const cursor = results?.cursor ?? null;
+  const canLoadMore = results?.canLoadMore ?? false;
+  const totalLoaded = results?.totalLoaded ?? 0;
+
+  // "done" as soon as a restored result set exists, so the empty-state card does
+  // not flash over cached rows after a reload.
+  const [searchStatus, setSearchStatus] = useState(() =>
+    calls.length > 0 ? "done" : "idle",
+  );
 
   // Queue status keyed by call_id, updated live via the socket.
   const [queueMap, setQueueMap] = useState({});
-  // Actively adding one call to the queue prevents concurrent adds.
+  // Actively adding to the queue; blocks concurrent adds.
   const [adding, setAdding] = useState(false);
-  // The expanded transcript row, if any.
-  const [expandedId, setExpandedId] = useState(null);
+  // Audio and transcript expansion are tracked separately and both allow many
+  // open rows at once, so opening one never collapses another.
+  const [expandedAudioIds, setExpandedAudioIds] = useState(() => new Set());
+  const [expandedTranscriptIds, setExpandedTranscriptIds] = useState(() => new Set());
+  // Multi-selection for batch transcription.
+  const [selectedCallIds, setSelectedCallIds] = useState(() => new Set());
+  // Human-readable outcome of the last batch add ("Добавлено: 10. Пропущено: 2").
+  const [batchResult, setBatchResult] = useState(null);
   const [error, setError] = useState(null);
 
   const selectedConnection = useMemo(
     () => connections.find((item) => item.id === connectionId),
     [connections, connectionId],
   );
+
+  // Switching connection must not carry per-row UI state across scopes: the row
+  // ids belong to the previous connection's result set.
+  useEffect(() => {
+    setExpandedAudioIds(new Set());
+    setExpandedTranscriptIds(new Set());
+    setSelectedCallIds(new Set());
+    setBatchResult(null);
+    setSearchStatus(calls.length > 0 ? "done" : "idle");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectionId]);
+
+  const toggleId = useCallback((setter, id) => {
+    setter((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
 
   // Load owned connections once.
   const loadConnections = useCallback(async () => {
@@ -315,15 +390,13 @@ export default function CallsPage() {
     if (connectionId) loadScenarios();
   }, [connectionId, loadScenarios]);
 
-  // Search calls, replacing the current page.
+  // Search calls, replacing the current page and persisting the result.
   const search = useCallback(async () => {
     if (!connectionId) return;
     setSearchStatus("searching");
     setError(null);
-    setCalls([]);
-    setCursor(null);
-    setCanLoadMore(false);
-    setTotalLoaded(0);
+    setSelectedCallIds(new Set());
+    setBatchResult(null);
 
     try {
       const response = await callsApi.search(
@@ -339,16 +412,18 @@ export default function CallsPage() {
         null,
       );
 
-      setCalls(response.items || []);
-      setTotalLoaded(response.total_loaded || 0);
-      setCursor(response.cursor || null);
-      setCanLoadMore(response.can_load_more ?? false);
+      setResults(
+        response.items || [],
+        response.cursor || null,
+        response.can_load_more ?? false,
+        response.total_loaded || 0,
+      );
       setSearchStatus("done");
     } catch (err) {
       setError(err);
       setSearchStatus("idle");
     }
-  }, [connectionId, filters]);
+  }, [connectionId, filters, setResults]);
 
   // Load more calls, appending to the current page.
   const loadMore = useCallback(async () => {
@@ -370,16 +445,19 @@ export default function CallsPage() {
         cursor,
       );
 
-      setCalls((prev) => [...prev, ...(response.items || [])]);
-      setTotalLoaded(response.total_loaded || 0);
-      setCursor(response.cursor || null);
-      setCanLoadMore(response.can_load_more ?? false);
+      appendResults(
+        response.items || [],
+        response.cursor || null,
+        response.can_load_more ?? false,
+        response.total_loaded || 0,
+      );
       setSearchStatus("done");
     } catch (err) {
       setError(err);
       setSearchStatus("done");
     }
-  }, [connectionId, cursor, filters]);
+  }, [connectionId, cursor, filters, appendResults]);
+
 
   // Add one call to the background transcription queue.
   const transcribe = useCallback(
@@ -400,6 +478,56 @@ export default function CallsPage() {
     [connectionId],
   );
 
+  // Add selected calls to the queue in one batch request.
+  const transcribeBatch = useCallback(async () => {
+    if (!connectionId || selectedCallIds.size === 0) return;
+    setAdding(true);
+    setError(null);
+    setBatchResult(null);
+
+    try {
+      const response = await queueApi.add(connectionId, Array.from(selectedCallIds));
+      const { queued, skipped_active, skipped_expired } = response;
+      const totalSkipped = skipped_active.length + skipped_expired.length;
+
+      if (queued > 0) {
+        setBatchResult(`Добавлено: ${queued}`);
+        setSelectedCallIds(new Set());
+      }
+
+      if (totalSkipped > 0) {
+        const reasons = [];
+        if (skipped_active.length) reasons.push(`${skipped_active.length} уже в очереди`);
+        if (skipped_expired.length) reasons.push(`${skipped_expired.length} устарели`);
+        const msg = `Добавлено: ${queued}. Пропущено: ${totalSkipped} (${reasons.join(", ")})`;
+        setBatchResult(msg);
+        if (queued === 0) {
+          setError({ message: msg, code: "ALL_SKIPPED" });
+        }
+      }
+    } catch (err) {
+      setError(err);
+    } finally {
+      setAdding(false);
+    }
+  }, [connectionId, selectedCallIds]);
+
+  // Selection helpers.
+  const toggleSelection = useCallback(
+    (callId) => {
+      toggleId(setSelectedCallIds, callId);
+    },
+    [toggleId],
+  );
+
+  const toggleSelectAll = useCallback(() => {
+    if (selectedCallIds.size === calls.length) {
+      setSelectedCallIds(new Set());
+    } else {
+      setSelectedCallIds(new Set(calls.map((call) => call.id)));
+    }
+  }, [selectedCallIds, calls]);
+
   // Subscribe to live queue events and merge them into local state.
   useEffect(() => {
     return subscribe((payload) => {
@@ -412,17 +540,21 @@ export default function CallsPage() {
       } else if (payload.type === "queue_item_done" && payload.item) {
         const { call_id, status, transcript_text } = payload.item;
         // Live-refresh the transcript in the table so reload is not needed.
-        setCalls((prev) =>
-          prev.map((call) =>
-            call.id === call_id && !call.transcript && transcript_text
-              ? { ...call, transcript: transcript_text }
-              : call,
-          ),
-        );
+        if (transcript_text) {
+          updateCall(call_id, { transcript: transcript_text });
+        }
         setQueueMap((prev) => ({ ...prev, [call_id]: status }));
       }
     });
-  }, [subscribe]);
+  }, [subscribe, updateCall]);
+
+  // Format the persisted timestamp for human consumption.
+  const searchedLabel = useMemo(() => {
+    if (!searchedAt) return null;
+    const date = new Date(searchedAt);
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }, [searchedAt]);
 
   return (
     <div className="space-y-6">
@@ -561,11 +693,58 @@ export default function CallsPage() {
 
           {calls.length > 0 && (
             <Card>
+              {searchedLabel && (
+                <div className="mb-4 text-xs text-slate-500">
+                  Результаты загружены в {searchedLabel}
+                </div>
+              )}
+
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-4 py-3">
+                <p className="text-sm text-slate-600">
+                  Выбрано: <span className="font-medium">{selectedCallIds.size}</span>
+                  {selectedCallIds.size > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedCallIds(new Set())}
+                      className="ml-3 text-xs font-medium text-slate-500 underline"
+                    >
+                      Сбросить
+                    </button>
+                  )}
+                </p>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {batchResult && (
+                    <span className="text-sm text-slate-600">{batchResult}</span>
+                  )}
+                  <Link to="/queue">
+                    <Button variant="secondary">Перейти в очередь</Button>
+                  </Link>
+                  <Button
+                    onClick={transcribeBatch}
+                    disabled={adding || selectedCallIds.size === 0}
+                  >
+                    {adding
+                      ? "Добавление..."
+                      : `Транскрибировать выбранные (${selectedCallIds.size})`}
+                  </Button>
+                </div>
+              </div>
+
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-sm">
                   <thead className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
                     <tr>
                       <th className="px-3 py-3">#</th>
+                      <th className="px-3 py-3">
+                        <input
+                          type="checkbox"
+                          checked={calls.length > 0 && selectedCallIds.size === calls.length}
+                          onChange={toggleSelectAll}
+                          className="h-4 w-4 rounded border-slate-300"
+                          aria-label="Выбрать все отображённые звонки"
+                        />
+                      </th>
                       <th className="px-3 py-3">Дата</th>
                       <th className="px-3 py-3">caller_a</th>
                       <th className="px-3 py-3">caller_b</th>
@@ -584,13 +763,17 @@ export default function CallsPage() {
                         index={index + 1}
                         connectionId={connectionId}
                         queueStatus={queueMap[call.id]}
-                        isExpanded={expandedId === call.id}
-                        onToggle={() =>
-                          setExpandedId(expandedId === call.id ? null : call.id)
+                        audioOpen={expandedAudioIds.has(call.id)}
+                        transcriptOpen={expandedTranscriptIds.has(call.id)}
+                        onToggleAudio={() => toggleId(setExpandedAudioIds, call.id)}
+                        onToggleTranscript={() =>
+                          toggleId(setExpandedTranscriptIds, call.id)
                         }
                         onTranscribe={transcribe}
                         onError={setError}
                         busy={adding}
+                        selected={selectedCallIds.has(call.id)}
+                        onToggleSelection={toggleSelection}
                       />
                     ))}
                   </tbody>
@@ -615,5 +798,3 @@ export default function CallsPage() {
     </div>
   );
 }
-
-

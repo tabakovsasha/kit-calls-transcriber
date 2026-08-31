@@ -4,10 +4,12 @@ import ChangePasswordPage from "./pages/ChangePasswordPage";
 import ConnectionsPage from "./pages/ConnectionsPage";
 import LoginPage from "./pages/LoginPage";
 import CallsPage from "./pages/CallsPage";
-import { QueuePage, SchedulesPage } from "./pages/PlaceholderPages";
+import QueuePage from "./pages/QueuePage";
+import { SchedulesPage } from "./pages/PlaceholderPages";
 import { EventsProvider } from "./realtime/EventsContext";
 import { useRoute } from "./router";
-import { SelectedConnectionProvider } from "./state/SelectedConnectionContext";
+import { CallsStateProvider } from "./state/CallsStateContext";
+import { SelectedConnectionProvider, useSelectedConnection } from "./state/SelectedConnectionContext";
 
 /**
  * Top-level gate.
@@ -57,11 +59,16 @@ export default function App() {
 
 function AuthenticatedApp() {
   const { path } = useRoute(DEFAULT_ROUTE);
+  const { selectedId } = useSelectedConnection();
   const Page = PAGES[path] ?? PAGES[DEFAULT_ROUTE];
 
   return (
-    <AppLayout currentPath={path}>
-      <Page />
-    </AppLayout>
+    // Calls state lives above the router, so leaving /calls unmounts the page
+    // but not its filters or loaded rows.
+    <CallsStateProvider connectionId={selectedId}>
+      <AppLayout currentPath={path}>
+        <Page />
+      </AppLayout>
+    </CallsStateProvider>
   );
 }

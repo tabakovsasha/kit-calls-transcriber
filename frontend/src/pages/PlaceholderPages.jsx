@@ -3,20 +3,9 @@ import { Card, EmptyState } from "../components/ui";
 /**
  * Placeholder sections.
  *
- * These exist so navigation and the shell are testable now; the real Queue and
- * Schedules UIs are separate stages and are deliberately not stubbed with fake
- * data here. Calls is implemented in CallsPage.jsx.
+ * Only Schedules remains a placeholder; it is a separate stage. Calls is
+ * implemented in CallsPage.jsx and Queue in QueuePage.jsx.
  */
-
-export function QueuePage() {
-  return (
-    <PlaceholderPage
-      title="Очередь"
-      description="Очередь задач транскрибации."
-      pending="Список задач, прогресс в реальном времени, отмена и повтор."
-    />
-  );
-}
 
 export function SchedulesPage() {
   return (

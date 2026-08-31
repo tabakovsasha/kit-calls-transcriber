@@ -17,6 +17,7 @@ import {
   setSessionLostHandler,
 } from "../api/client";
 import { authApi } from "../api/endpoints";
+import { clearUiState } from "../state/storage";
 
 const AuthContext = createContext(null);
 
@@ -74,6 +75,9 @@ export function AuthProvider({ children }) {
       // A failed logout must not trap the user in an authenticated shell.
     } finally {
       clearAccessToken();
+      // Drop this user's cached UI state (Calls rows, filters, queue table
+      // preferences) so the next login on this browser starts clean.
+      clearUiState();
       setUser(null);
       setStatus("anonymous");
     }
