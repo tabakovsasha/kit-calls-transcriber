@@ -6,6 +6,7 @@ import LoginPage from "./pages/LoginPage";
 import CallsPage from "./pages/CallsPage";
 import QueuePage from "./pages/QueuePage";
 import { SchedulesPage } from "./pages/PlaceholderPages";
+import WhisperPage from "./pages/WhisperPage";
 import { EventsProvider } from "./realtime/EventsContext";
 import { useRoute } from "./router";
 import { CallsStateProvider } from "./state/CallsStateContext";
@@ -31,6 +32,9 @@ const PAGES = {
   "/queue": QueuePage,
   "/schedules": SchedulesPage,
   "/connections": ConnectionsPage,
+  // Server-wide Whisper settings. The page itself enforces the ADMIN check, so
+  // a USER who types the hash sees the read-only notice rather than a blank route.
+  "/whisper": WhisperPage,
 };
 
 export default function App() {

@@ -195,6 +195,10 @@ def calculate_performance_plan(
     return {
         "profile": normalized,
         "whisper_model": model,
+        # Inference runs on CPU: whisper_service loads every model with
+        # device="cpu" and fp16=False. Reported here so the UI states the real
+        # device instead of inferring one from torch's CUDA availability.
+        "device": "cpu",
         "physical_cores": total_cores,
         "logical_cores": LOGICAL_CPU_COUNT,
         "usable_cores": usable_cores,

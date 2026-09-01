@@ -4,13 +4,10 @@ Persists to the database so UI changes survive restarts. The in-process cache is
 refreshed on write, and read synchronously by the worker at job start.
 """
 
-from typing import Annotated
-
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 
 from app.api.deps import AdminUserDep, SessionDep
-from app.core.runtime import PROFILE_MODERATE, runtime
-from app.db.models import User
+from app.core.runtime import runtime
 from app.schemas.settings import (
     DefaultModelRequest,
     ModelActionResponse,
@@ -83,16 +80,24 @@ async def get_runtime_settings(
     _admin: AdminUserDep,
 ) -> RuntimeSettingsResponse:
     """Current default model, profile, and the computed runtime plan."""
+    from app.core.runtime import PROFILE_MAX, PROFILE_MODERATE, calculate_performance_plan
+    
     model = await app_settings_service.get(
         db, app_settings_service.KEY_DEFAULT_MODEL, "base"
     )
     profile = await app_settings_service.get(
         db, app_settings_service.KEY_PROFILE, PROFILE_MODERATE
     )
+    # Compute both plans so the UI can show "Optimal" vs "Maximum" side by side.
+    moderate_plan = calculate_performance_plan(PROFILE_MODERATE, model)
+    max_plan = calculate_performance_plan(PROFILE_MAX, model)
+    
     return RuntimeSettingsResponse(
         default_model=model,
         profile=profile,
         runtime_plan=runtime.plan,
+        moderate_plan=moderate_plan,
+        max_plan=max_plan,
     )
 
 
@@ -103,19 +108,26 @@ async def set_default_whisper_model(
     _admin: AdminUserDep,
 ) -> RuntimeSettingsResponse:
     """Change default model and recompute the runtime plan."""
+    from app.core.runtime import PROFILE_MAX, PROFILE_MODERATE, calculate_performance_plan
+    
     await app_settings_service.set_value(
         db, app_settings_service.KEY_DEFAULT_MODEL, payload.whisper_model
     )
     await db.commit()
-    plan = await runtime.apply_model(payload.whisper_model)
+    await runtime.apply_model(payload.whisper_model)
     
     profile = await app_settings_service.get(
         db, app_settings_service.KEY_PROFILE, PROFILE_MODERATE
     )
+    moderate_plan = calculate_performance_plan(PROFILE_MODERATE, payload.whisper_model)
+    max_plan = calculate_performance_plan(PROFILE_MAX, payload.whisper_model)
+    
     return RuntimeSettingsResponse(
         default_model=payload.whisper_model,
         profile=profile,
-        runtime_plan=plan,
+        runtime_plan=runtime.plan,
+        moderate_plan=moderate_plan,
+        max_plan=max_plan,
     )
 
 
@@ -126,18 +138,26 @@ async def set_performance_profile(
     _admin: AdminUserDep,
 ) -> RuntimeSettingsResponse:
     """Change performance profile and recompute concurrency."""
+    from app.core.runtime import PROFILE_MAX, PROFILE_MODERATE, calculate_performance_plan
+    
     await app_settings_service.set_value(
         db, app_settings_service.KEY_PROFILE, payload.profile
     )
     await db.commit()
-    plan = await runtime.apply_profile(payload.profile)
     
     model = await app_settings_service.get(
         db, app_settings_service.KEY_DEFAULT_MODEL, "base"
     )
+    await runtime.apply_profile(payload.profile, whisper_model=model)
+    
+    moderate_plan = calculate_performance_plan(PROFILE_MODERATE, model)
+    max_plan = calculate_performance_plan(PROFILE_MAX, model)
+    
     return RuntimeSettingsResponse(
         default_model=model,
         profile=payload.profile,
-        runtime_plan=plan,
+        runtime_plan=runtime.plan,
+        moderate_plan=moderate_plan,
+        max_plan=max_plan,
     )
 

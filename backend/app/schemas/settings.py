@@ -71,6 +71,10 @@ class RuntimeSettingsResponse(BaseModel):
     )
     supported_profiles: List[str] = Field(default_factory=lambda: list(SUPPORTED_PROFILES))
     runtime_plan: Dict[str, Any]
+    # Precomputed plans for both profiles with the current model, so the UI can
+    # show "Optimal" vs "Maximum" without guessing.
+    moderate_plan: Dict[str, Any] = Field(default_factory=dict)
+    max_plan: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ModelActionResponse(BaseModel):

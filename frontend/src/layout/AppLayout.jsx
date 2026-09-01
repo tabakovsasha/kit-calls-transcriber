@@ -16,6 +16,8 @@ const NAV_ITEMS = [
   { to: "/queue", label: "Очередь" },
   { to: "/schedules", label: "Расписания" },
   { to: "/connections", label: "Подключения" },
+  // Server-wide Whisper settings: ADMIN only, so the item is hidden for USER.
+  { to: "/whisper", label: "Whisper", adminOnly: true },
 ];
 
 const SOCKET_LABELS = {
@@ -30,6 +32,11 @@ export default function AppLayout({ currentPath, children }) {
   const { user, logout } = useAuth();
   const { socketState, lastEventAt } = useEvents();
   const socket = SOCKET_LABELS[socketState] ?? SOCKET_LABELS.idle;
+
+  // Server-wide sections are hidden for non-admins; the backend rejects them
+  // anyway, so showing the entry would only advertise a dead end.
+  const isAdmin = user?.role === "ADMIN";
+  const navItems = NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin);
 
   const navClass = (to, active) =>
     `block rounded-md px-3 py-2 text-sm font-medium transition ${
@@ -46,7 +53,7 @@ export default function AppLayout({ currentPath, children }) {
 
         <nav className="flex-1 px-3 py-4" aria-label="Основная навигация">
           <ul className="space-y-1">
-            {NAV_ITEMS.map((item) => (
+            {navItems.map((item) => (
               <li key={item.to}>
                 <Link
                   to={item.to}
@@ -74,7 +81,7 @@ export default function AppLayout({ currentPath, children }) {
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-6 py-3">
           <nav className="flex gap-1 md:hidden" aria-label="Навигация">
-            {NAV_ITEMS.map((item) => (
+            {navItems.map((item) => (
               <Link
                 key={item.to}
                 to={item.to}

@@ -91,6 +91,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # cache so the worker and enqueue logic never query per item.
         from app.services import app_settings_service
         await app_settings_service.load_all(db)
+        # Apply the persisted profile and model so the runtime plan reflects what
+        # the admin chose, not only the .env default.
+        profile = await app_settings_service.resolve_profile(db)
+        model = await app_settings_service.resolve_default_model(db)
+        await runtime.apply_profile(profile, whisper_model=model)
 
     worker_service.start_workers()
     logger.info(

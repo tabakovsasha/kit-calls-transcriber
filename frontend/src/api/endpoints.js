@@ -87,3 +87,13 @@ export const connectionsApi = {
       verify,
     }),
 };
+
+export const settingsApi = {
+  hardware: () => api.get("/settings/hardware"),
+  models: () => api.get("/settings/whisper/models"),
+  downloadModel: (modelName) => api.post(`/settings/whisper/models/${modelName}/download`),
+  deleteModel: (modelName) => api.del(`/settings/whisper/models/${modelName}`),
+  current: () => api.get("/settings/current"),
+  setDefaultModel: (whisperModel) => api.put("/settings/default-model", { whisper_model: whisperModel }),
+  setProfile: (profile) => api.put("/settings/performance-profile", { profile }),
+};
